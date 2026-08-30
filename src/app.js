@@ -227,6 +227,7 @@ async function buildPage(entry,markdown,index){
   const intermediate=/Take Kotlin tour → Intermediate/i.test(entry.hierarchy);
   const beginnerBeforeNull=/Take Kotlin tour → Beginner/i.test(entry.hierarchy) && !beginnerNullSafety;
   return {
+    id,
     pageId:id,
     title:entry.title || titleFromPath(slug),
     hierarchy:entry.hierarchy,
