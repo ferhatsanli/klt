@@ -138,19 +138,29 @@ async function updateDocumentation(){
   $("updateStatus").textContent="Downloading Kotlin documentation index…";
   try{
     const revision=await getLatestRevision();
-    const tree=await fetchText(`${SOURCE.rawBase}${SOURCE.treePath}`);
+    const [tree,topicPaths]=await Promise.all([
+      fetchText(`${SOURCE.rawBase}${SOURCE.treePath}`),
+      getTopicPathLookup()
+    ]);
     let entries=parseTree(tree);
+    const resolution=resolveTopicPaths(entries,topicPaths);
+    if(resolution.unresolved.length||resolution.ambiguous.length){
+      throw new Error(formatResolutionError(resolution));
+    }
+    entries=resolution.resolved;
 
     // Keep What's New near the end of the learning roadmap rather than its sidebar position.
     entries=entries.sort((a,b)=>roadmapRank(a)-roadmapRank(b) || a.originalOrder-b.originalOrder);
     $("updateStatus").textContent=`Analyzing ${entries.length} documentation pages…`;
 
+    const downloadFailures=[];
     const docs=await mapLimit(entries,8,async (entry,index)=>{
       try {
         const markdown=await fetchText(`${SOURCE.rawBase}${entry.sourcePath}`);
         return await buildPage(entry,markdown,index);
       } catch (error) {
         if(error.code==="invalid-page-id") throw error;
+        downloadFailures.push({sourcePath:entry.sourcePath,message:error.message});
         console.warn("Skipping documentation source",entry.sourcePath,error);
         return null;
       }
@@ -173,7 +183,7 @@ async function updateDocumentation(){
     }
     for(const [pageId,old] of existing){
       requirePageId(pageId,old.sourcePath);
-      if(!incoming.has(pageId) && !old.deprecated){
+      if(!incoming.has(pageId) && !downloadFailures.some(failure=>failure.sourcePath===old.sourcePath) && !old.deprecated){
         removed++;
         writes.push({ref:firestoreSdk.doc(db,"documentation","pages","items",pageId),data:{deprecated:true,deprecatedAt:firestoreSdk.serverTimestamp()}});
       }
@@ -187,7 +197,8 @@ async function updateDocumentation(){
       sourceTree:SOURCE.treePath
     },{merge:true});
 
-    $("updateStatus").textContent=`Updated: ${added} added, ${changed} changed, ${removed} removed, ${pages.length} total.`;
+    const diagnostics=downloadFailures.length?` Skipped ${downloadFailures.length} download failure(s): ${downloadFailures.slice(0,3).map(failure=>failure.sourcePath).join(", ")}.`:"";
+    $("updateStatus").textContent=`Updated: ${added} added, ${changed} changed, ${removed} removed, ${pages.length} total.${diagnostics}`;
     state.updateAvailable=false;
     hideBanner();
     await loadCatalog(); render();
@@ -212,11 +223,41 @@ function parseTree(xml){
     if(topic && !hidden){
       const clean=topic.replace(/^\//,"");
       const sourcePath=clean.startsWith("docs/")?clean:`docs/topics/${clean}`;
-      results.push({title:title || titleFromPath(clean),hierarchy:[...stack,title || titleFromPath(clean)].filter(Boolean).join(" → "),sourcePath,originalOrder:order++});
+      results.push({title:title || titleFromPath(clean),hierarchy:[...stack,title || titleFromPath(clean)].filter(Boolean).join(" → "),topic:clean,sourcePath,originalOrder:order++});
     }
     if(!selfClosing && title) stack.push(title);
   }
   return dedupe(results,p=>p.sourcePath);
+}
+
+async function getTopicPathLookup(){
+  const url=`https://api.github.com/repos/${SOURCE.repo}/git/trees/${encodeURIComponent(SOURCE.branch)}?recursive=1`;
+  const response=await fetch(url,{headers:{Accept:"application/vnd.github+json"}});
+  if(!response.ok)throw new Error(`GitHub topic tree request failed (${response.status})`);
+  const data=await response.json();
+  if(data.truncated)throw new Error("GitHub topic tree response was truncated; refusing to resolve partial paths.");
+  const paths=(data.tree||[]).filter(item=>item.type==="blob"&&item.path.startsWith("docs/topics/")).map(item=>item.path);
+  const byFilename=new Map();
+  for(const path of paths){const filename=path.split("/").pop();if(!byFilename.has(filename))byFilename.set(filename,[]);byFilename.get(filename).push(path);}
+  return {paths:new Set(paths),byFilename};
+}
+
+function resolveTopicPaths(entries,lookup){
+  const resolved=[],unresolved=[],ambiguous=[];
+  for(const entry of entries){
+    const direct=entry.topic.startsWith("docs/")?entry.topic:`docs/topics/${entry.topic}`;
+    if(lookup.paths.has(direct)){resolved.push({...entry,sourcePath:direct});continue;}
+    const matches=lookup.byFilename.get(entry.topic.split("/").pop())||[];
+    if(matches.length===1)resolved.push({...entry,sourcePath:matches[0]});
+    else if(matches.length===0)unresolved.push(entry);
+    else ambiguous.push({entry,matches});
+  }
+  return {resolved,unresolved,ambiguous};
+}
+
+function formatResolutionError({resolved,unresolved,ambiguous}){
+  const details=[...unresolved.map(entry=>`${entry.topic} (unresolved)`),...ambiguous.map(({entry,matches})=>`${entry.topic} (ambiguous: ${matches.join(", ")})`)];
+  return `Topic path resolution stopped before Firestore writes: ${resolved.length} resolved, ${unresolved.length} unresolved, ${ambiguous.length} ambiguous. ${details.slice(0,5).join("; ")}`;
 }
 
 async function buildPage(entry,markdown,index){
