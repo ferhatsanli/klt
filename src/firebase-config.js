@@ -1,13 +1,11 @@
 // Firebase Web configuration is public by design; security is enforced by Auth + Firestore rules.
-// IMPORTANT: The apiKey supplied by Firebase Gemini looked synthetic. Replace it with the exact
-// value from Firebase Console > Project settings > Your apps > Kotlin Learning Tracker Web.
 export const firebaseConfig = {
-  apiKey: "REPLACE_WITH_FIREBASE_CONSOLE_API_KEY",
+  apiKey: "AIzaSyA8gsGK6KOwvuS2923oIFxhRPswC3mn7KI",
   authDomain: "kotlin-learning-tracker.firebaseapp.com",
   projectId: "kotlin-learning-tracker",
-  storageBucket: "kotlin-learning-tracker.appspot.com",
+  storageBucket: "kotlin-learning-tracker.firebasestorage.app",
   messagingSenderId: "1052213919057",
-  appId: "1:1052213919057:web:9c7a23fb51e8e0d6"
+  appId: "1:1052213919057:web:456c8d9cfe90126cd7a770"
 };
 
 export const functionsRegion = "us-central1";
