@@ -16,7 +16,7 @@ const SOURCE = {
 };
 
 const configured = !firebaseConfig.apiKey.startsWith("REPLACE_");
-const state = { user:null, pages:[], progress:new Map(), filter:"all", query:"", updateAvailable:false, isAdmin:false };
+const state = { user:null, pages:[], progress:new Map(), filter:"all", query:"", updateAvailable:false, isAdmin:false, readingWpm:200 };
 const $ = (id) => document.getElementById(id);
 
 let auth, db;
@@ -31,13 +31,13 @@ if (configured) {
 }
 
 $("settingsButton").addEventListener("click", () => $("settingsDialog").showModal());
+$("settingsDialog").addEventListener("close", applyReadingSpeed);
 $("authButton").addEventListener("click", signIn);
 $("signOutButton").addEventListener("click", () => auth && authSdk.signOut(auth));
 $("checkUpdatesButton").addEventListener("click", checkUpdates);
 $("updateDocsButton").addEventListener("click", updateDocumentation);
 $("statusBannerClose").addEventListener("click", hideBanner);
 $("searchInput").addEventListener("input", (e) => { state.query=e.target.value.toLowerCase().trim(); render(); });
-$("wpmInput").addEventListener("change", savePreferences);
 document.querySelectorAll(".filter-button").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll(".filter-button").forEach(x=>x.classList.remove("active"));
   b.classList.add("active"); state.filter=b.dataset.filter; render();
@@ -83,18 +83,26 @@ async function loadProgress(){
 async function loadPreferences(){
   const ref=firestoreSdk.doc(db,"users",state.user.uid,"settings","preferences");
   const snap=await firestoreSdk.getDoc(ref);
-  if(snap.exists()&&snap.data().readingWpm) $("wpmInput").value=snap.data().readingWpm;
+  state.readingWpm=snap.exists()&&snap.data().readingWpm?clampWpm(snap.data().readingWpm):200;
+  $("wpmInput").value=state.readingWpm;
 }
-async function savePreferences(){
-  if(!state.user) return;
-  const readingWpm=Math.max(100,Math.min(500,Number($("wpmInput").value)||200));
+async function applyReadingSpeed(){
+  const readingWpm=clampWpm($("wpmInput").value);
   $("wpmInput").value=readingWpm;
-  await firestoreSdk.setDoc(
-    firestoreSdk.doc(db,"users",state.user.uid,"settings","preferences"),
-    {readingWpm,updatedAt:firestoreSdk.serverTimestamp()},{merge:true}
-  );
+  if(readingWpm===state.readingWpm) return;
+  state.readingWpm=readingWpm;
   render();
+  if(!state.user) return;
+  try{
+    await firestoreSdk.setDoc(
+      firestoreSdk.doc(db,"users",state.user.uid,"settings","preferences"),
+      {readingWpm,updatedAt:firestoreSdk.serverTimestamp()},{merge:true}
+    );
+  }catch(error){
+    showBanner(`Could not save reading speed: ${error.message}`,true);
+  }
 }
+function clampWpm(value){return Math.max(100,Math.min(500,Number(value)||200));}
 async function setLessonStatus(pageId,status,sourcePath){
   if(!state.user) return showBanner("Sign in to save progress across devices.");
   requirePageId(pageId,sourcePath);
@@ -310,12 +318,15 @@ async function commitInChunks(writes){for(let i=0;i<writes.length;i+=400){const 
 function statusOf(page){return lessonStatus(page,state.progress.get(page.pageId));}
 function isDone(page){return statusOf(page)===LESSON_STATUS.COMPLETED;}
 function filteredPages(){return state.pages.filter(p=>{if(!matchesStatusFilter(statusOf(p),state.filter))return false;const hay=`${p.title||""} ${p.hierarchy||""}`.toLowerCase();return !state.query||hay.includes(state.query);});}
+function studyFactor(page){return /Language guide|Interoperability|Development/i.test(page.hierarchy||"")?2.8:/Kotlin tour/i.test(page.hierarchy||"")?2.4:2.2;}
+function readingMinutesFor(page,wpm=state.readingWpm){return Math.max(1,Math.ceil((page.wordCount||0)/wpm));}
+function studyMinutesFor(page,wpm=state.readingWpm){const factor=studyFactor(page),baselineReading=readingMinutesFor(page,200),currentReading=readingMinutesFor(page,wpm),baselineStudy=Number(page.estimatedStudyMinutes)||baselineReading;const practiceMinutes=Math.max(0,baselineStudy-Math.ceil(baselineReading*factor));return Math.max(currentReading,Math.ceil(currentReading*factor+practiceMinutes));}
 function hierarchyParents(page,category){const parts=String(page.hierarchy||"").split("→").map(part=>part.trim()).filter(Boolean);if(parts[0]===category)parts.shift();if(parts.length&&parts.at(-1).localeCompare(String(page.title||""),undefined,{sensitivity:"base"})===0)parts.pop();return parts;}
 function hierarchyTree(pages,category){const root={children:new Map(),pages:[]};for(const page of pages){let node=root;for(const name of hierarchyParents(page,category)){if(!node.children.has(name))node.children.set(name,{name,children:new Map(),pages:[]});node=node.children.get(name);}node.pages.push(page);}return root;}
 function hierarchyCount(node){const pages=[...node.pages];for(const child of node.children.values())pages.push(...hierarchyCount(child).pages);return {pages,done:pages.filter(isDone).length};}
 function hierarchyHtml(node,depth=0){const direct=node.pages.length?`<div class="lesson-list">${node.pages.map(lessonHtml).join("")}</div>`:"";const children=[...node.children.values()].map(child=>{const count=hierarchyCount(child);return `<section class="hierarchy-group" style="--depth:${depth}"><div class="hierarchy-heading"><span>${esc(child.name)}</span><span class="hierarchy-meta">${count.done}/${count.pages.length} complete</span></div>${hierarchyHtml(child,depth+1)}</section>`;}).join("");return `${direct}${children}`;}
 function render(){
-  const total=state.pages.length,done=state.pages.filter(isDone).length,pct=total?Math.round(done/total*100):0,remaining=state.pages.filter(p=>!isDone(p)).reduce((n,p)=>n+(p.estimatedStudyMinutes||0),0);
+  const total=state.pages.length,done=state.pages.filter(isDone).length,pct=total?Math.round(done/total*100):0,remaining=state.pages.filter(p=>!isDone(p)).reduce((n,p)=>n+studyMinutesFor(p),0);
   $("progressRing").style.setProperty("--progress",pct); $("progressPercent").textContent=`${pct}%`; $("pagesMetric").textContent=total?`${done} / ${total}`:"—"; $("timeMetric").textContent=total?formatMinutes(remaining):"—"; $("catalogMetric").textContent=total?total:"—"; $("catalogMetricSub").textContent=total?"documentation pages":"not loaded";
   $("progressHeadline").textContent=state.user?(total?`${total-done} pages left in your roadmap`:"Catalog ready for its first sync"):"Sign in to sync your progress";
   $("progressSubline").textContent=state.user?"Completion is stored privately under your Google account.":"Your progress follows your Google account across devices.";
@@ -324,7 +335,7 @@ function render(){
   $("curriculum").innerHTML=[...groups].map(([category,pages])=>`<article class="category glass"><div class="category-header"><span class="category-title">${esc(category)}</span><span class="category-meta">${pages.filter(isDone).length}/${pages.length} complete</span></div><div class="hierarchy-tree">${hierarchyHtml(hierarchyTree(pages,category))}</div></article>`).join("") || `<div class="empty-state glass"><h2>No matching pages</h2><p>Try another search or filter.</p></div>`;
   $("curriculum").querySelectorAll(".lesson-status").forEach(control=>control.addEventListener("change",async()=>{control.disabled=true;try{await setLessonStatus(control.dataset.pageId,control.value,control.dataset.sourcePath);}catch(error){showBanner(`Could not update lesson status: ${error.message}`,true);render();}}));
 }
-function lessonHtml(p){const status=statusOf(p),wpm=Number($("wpmInput").value)||200,reading=Math.max(1,Math.ceil((p.wordCount||0)/wpm));return `<div class="lesson"><select class="lesson-status status-${esc(status)}" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" aria-label="Status for ${esc(p.title)}"><option value="toLearn" ${status===LESSON_STATUS.TO_LEARN?"selected":""}>To Learn</option><option value="review" ${status===LESSON_STATUS.REVIEW?"selected":""}>Review</option><option value="completed" ${status===LESSON_STATUS.COMPLETED?"selected":""}>Completed</option></select><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${p.estimatedStudyMinutes||"—"}m study</div></div>`;}
+function lessonHtml(p){const status=statusOf(p),reading=readingMinutesFor(p),study=studyMinutesFor(p);return `<div class="lesson"><select class="lesson-status status-${esc(status)}" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" aria-label="Status for ${esc(p.title)}"><option value="toLearn" ${status===LESSON_STATUS.TO_LEARN?"selected":""}>To Learn</option><option value="review" ${status===LESSON_STATUS.REVIEW?"selected":""}>Review</option><option value="completed" ${status===LESSON_STATUS.COMPLETED?"selected":""}>Completed</option></select><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${study}m study</div></div>`;}
 function formatMinutes(m){if(m<60)return `${Math.round(m)}m`;const totalMinutes=Math.round(m);if(totalMinutes<1440){const h=Math.floor(totalMinutes/60),min=totalMinutes%60;return min?`${h}h ${min}m`:`${h}h`;}const days=Math.floor(totalMinutes/1440),remainingMinutes=totalMinutes%1440,hours=Math.floor(remainingMinutes/60),min=remainingMinutes%60;const parts=[`${days}d`];if(hours)parts.push(`${hours}h`);if(min)parts.push(`${min}m`);return parts.join(" ");}
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
 function showBanner(message,error=false){$("statusBannerMessage").textContent=message;const el=$("statusBanner");el.classList.remove("hidden");el.classList.toggle("error",error);}
