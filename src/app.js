@@ -1,4 +1,5 @@
 import { firebaseConfig, firebaseSdkVersion } from "./firebase-config.js";
+import { LESSON_STATUS, isLessonStatus, lessonStatus, matchesStatusFilter } from "./status.mjs";
 
 const sdk = `https://www.gstatic.com/firebasejs/${firebaseSdkVersion}`;
 const [{ initializeApp }, authSdk, firestoreSdk] = await Promise.all([
@@ -94,13 +95,16 @@ async function savePreferences(){
   );
   render();
 }
-async function setCompleted(pageId,completed,sourcePath){
+async function setLessonStatus(pageId,status,sourcePath){
   if(!state.user) return showBanner("Sign in to save progress across devices.");
   requirePageId(pageId,sourcePath);
+  if(!isLessonStatus(status))throw new Error(`Invalid lesson status: ${status}`);
   const ref=firestoreSdk.doc(db,"users",state.user.uid,"progress",pageId);
-  const value={pageId,completed,completedAt:completed?firestoreSdk.serverTimestamp():null,updatedAt:firestoreSdk.serverTimestamp()};
+  const existing=state.progress.get(pageId)||{};
+  const completed=status===LESSON_STATUS.COMPLETED;
+  const value={pageId,status,completed,completedAt:completed?(existing.completedAt||firestoreSdk.serverTimestamp()):null,updatedAt:firestoreSdk.serverTimestamp()};
   await firestoreSdk.setDoc(ref,value,{merge:true});
-  state.progress.set(pageId,{...(state.progress.get(pageId)||{}),...value});
+  state.progress.set(pageId,{...existing,...value});
   render();
 }
 
@@ -303,9 +307,9 @@ async function fetchText(url){const r=await fetch(url);if(!r.ok)throw new Error(
 async function mapLimit(items,limit,worker){const output=new Array(items.length);let cursor=0;async function run(){while(true){const i=cursor++;if(i>=items.length)return;output[i]=await worker(items[i],i);}}await Promise.all(Array.from({length:Math.min(limit,items.length)},run));return output;}
 async function commitInChunks(writes){for(let i=0;i<writes.length;i+=400){const batch=firestoreSdk.writeBatch(db);for(const item of writes.slice(i,i+400))batch.set(item.ref,item.data,{merge:true});await batch.commit();}}
 
-function isReview(page){return page.learningMode==="review";}
-function isDone(page){const progress=state.progress.get(page.pageId);return progress ? progress.completed===true : page.initiallyCompleted===true;}
-function filteredPages(){return state.pages.filter(p=>{const done=isDone(p),review=isReview(p);if(state.filter==="done"&&!done)return false;if(state.filter==="todo"&&(done||review))return false;if(state.filter==="review"&&!review)return false;const hay=`${p.title||""} ${p.hierarchy||""}`.toLowerCase();return !state.query||hay.includes(state.query);});}
+function statusOf(page){return lessonStatus(page,state.progress.get(page.pageId));}
+function isDone(page){return statusOf(page)===LESSON_STATUS.COMPLETED;}
+function filteredPages(){return state.pages.filter(p=>{if(!matchesStatusFilter(statusOf(p),state.filter))return false;const hay=`${p.title||""} ${p.hierarchy||""}`.toLowerCase();return !state.query||hay.includes(state.query);});}
 function hierarchyParents(page,category){const parts=String(page.hierarchy||"").split("→").map(part=>part.trim()).filter(Boolean);if(parts[0]===category)parts.shift();if(parts.length&&parts.at(-1).localeCompare(String(page.title||""),undefined,{sensitivity:"base"})===0)parts.pop();return parts;}
 function hierarchyTree(pages,category){const root={children:new Map(),pages:[]};for(const page of pages){let node=root;for(const name of hierarchyParents(page,category)){if(!node.children.has(name))node.children.set(name,{name,children:new Map(),pages:[]});node=node.children.get(name);}node.pages.push(page);}return root;}
 function hierarchyCount(node){const pages=[...node.pages];for(const child of node.children.values())pages.push(...hierarchyCount(child).pages);return {pages,done:pages.filter(isDone).length};}
@@ -318,9 +322,9 @@ function render(){
   $("emptyState").classList.toggle("hidden",total>0); $("curriculum").classList.toggle("hidden",total===0); if(!total)return;
   const groups=new Map(); filteredPages().forEach(p=>{const category=p.category||String(p.hierarchy||"Other").split(" → ")[0];if(!groups.has(category))groups.set(category,[]);groups.get(category).push(p)});
   $("curriculum").innerHTML=[...groups].map(([category,pages])=>`<article class="category glass"><div class="category-header"><span class="category-title">${esc(category)}</span><span class="category-meta">${pages.filter(isDone).length}/${pages.length} complete</span></div><div class="hierarchy-tree">${hierarchyHtml(hierarchyTree(pages,category))}</div></article>`).join("") || `<div class="empty-state glass"><h2>No matching pages</h2><p>Try another search or filter.</p></div>`;
-  $("curriculum").querySelectorAll(".lesson-check").forEach(c=>c.addEventListener("change",()=>setCompleted(c.dataset.pageId,c.checked,c.dataset.sourcePath)));
+  $("curriculum").querySelectorAll(".lesson-status").forEach(control=>control.addEventListener("change",async()=>{control.disabled=true;try{await setLessonStatus(control.dataset.pageId,control.value,control.dataset.sourcePath);}catch(error){showBanner(`Could not update lesson status: ${error.message}`,true);render();}}));
 }
-function lessonHtml(p){const review=isReview(p),done=isDone(p),wpm=Number($("wpmInput").value)||200,reading=Math.max(1,Math.ceil((p.wordCount||0)/wpm));return `<div class="lesson"><input class="lesson-check" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" type="checkbox" ${done?"checked":""} aria-label="Mark ${esc(p.title)} complete"><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a>${review?'<span class="review-badge">REVIEW</span>':''}</div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${p.estimatedStudyMinutes||"—"}m study</div></div>`;}
+function lessonHtml(p){const status=statusOf(p),wpm=Number($("wpmInput").value)||200,reading=Math.max(1,Math.ceil((p.wordCount||0)/wpm));return `<div class="lesson"><select class="lesson-status status-${esc(status)}" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" aria-label="Status for ${esc(p.title)}"><option value="toLearn" ${status===LESSON_STATUS.TO_LEARN?"selected":""}>To Learn</option><option value="review" ${status===LESSON_STATUS.REVIEW?"selected":""}>Review</option><option value="completed" ${status===LESSON_STATUS.COMPLETED?"selected":""}>Completed</option></select><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${p.estimatedStudyMinutes||"—"}m study</div></div>`;}
 function formatMinutes(m){if(m<60)return `${Math.round(m)}m`;const h=Math.floor(m/60),min=Math.round(m%60);return min?`${h}h ${min}m`:`${h}h`;}
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
 function showBanner(message,error=false){$("statusBannerMessage").textContent=message;const el=$("statusBanner");el.classList.remove("hidden");el.classList.toggle("error",error);}

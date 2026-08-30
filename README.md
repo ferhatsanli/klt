@@ -25,9 +25,9 @@ A long-lived progress tracker for studying the official Kotlin documentation. Th
 
 ## Progress model
 
-Each Google user gets private progress under `users/{uid}/progress/{pageId}`. The documentation catalog is shared and read-only to regular users. An authenticated user with the `admin: true` claim can update it directly from the browser under the Firestore rules.
+Each Google user gets a private lesson status under `users/{uid}/progress/{pageId}`: `toLearn`, `review` or `completed`. Existing `completed` progress remains backward-compatible. The documentation catalog is shared and read-only to regular users. An authenticated user with the `admin: true` claim can update it directly from the browser under the Firestore rules.
 
-Pages in the Kotlin Tour Beginner section before **Null safety** are initialized as completed. Intermediate Tour pages are labeled as review material. These defaults can later be migrated into explicit per-user progress if desired.
+Pages in the Kotlin Tour Beginner section before **Null safety** default to completed, while Intermediate Tour pages default to Review. A user's explicit status always overrides these catalog defaults.
 
 ## Documentation updates
 
