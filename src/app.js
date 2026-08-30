@@ -16,8 +16,21 @@ const SOURCE = {
 };
 
 const configured = !firebaseConfig.apiKey.startsWith("REPLACE_");
-const state = { user:null, pages:[], progress:new Map(), filter:"all", query:"", updateAvailable:false, isAdmin:false, readingWpm:200 };
+const state = {
+  user:null,
+  pages:[],
+  progress:new Map(),
+  filter:"all",
+  query:"",
+  updateAvailable:false,
+  isAdmin:false,
+  readingWpm:200,
+  timeFilter:{enabled:false,min:20,max:40,visibleMax:60,hardMax:60}
+};
 const $ = (id) => document.getElementById(id);
+const TIME_STEP=5;
+const TIME_MIN_VISIBLE_MAX=60;
+const TIME_HEADROOM=20;
 
 let auth, db;
 if (configured) {
@@ -38,10 +51,13 @@ $("checkUpdatesButton").addEventListener("click", checkUpdates);
 $("updateDocsButton").addEventListener("click", updateDocumentation);
 $("statusBannerClose").addEventListener("click", hideBanner);
 $("searchInput").addEventListener("input", (e) => { state.query=e.target.value.toLowerCase().trim(); render(); });
-document.querySelectorAll(".filter-button").forEach(b => b.addEventListener("click", () => {
-  document.querySelectorAll(".filter-button").forEach(x=>x.classList.remove("active"));
+document.querySelectorAll(".filter-button[data-filter]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".filter-button[data-filter]").forEach(x=>x.classList.remove("active"));
   b.classList.add("active"); state.filter=b.dataset.filter; render();
 }));
+$("timeButton").addEventListener("click", toggleTimeFilter);
+$("timeMinRange").addEventListener("input",()=>syncTimeFilter("min"));
+$("timeMaxRange").addEventListener("input",()=>syncTimeFilter("max"));
 
 async function signIn(){
   if(!auth) return;
@@ -317,10 +333,17 @@ async function commitInChunks(writes){for(let i=0;i<writes.length;i+=400){const 
 
 function statusOf(page){return lessonStatus(page,state.progress.get(page.pageId));}
 function isDone(page){return statusOf(page)===LESSON_STATUS.COMPLETED;}
-function filteredPages(){return state.pages.filter(p=>{if(!matchesStatusFilter(statusOf(p),state.filter))return false;const hay=`${p.title||""} ${p.hierarchy||""}`.toLowerCase();return !state.query||hay.includes(state.query);});}
+function filteredPages(){return state.pages.filter(p=>{if(!matchesStatusFilter(statusOf(p),state.filter))return false;if(state.timeFilter.enabled){const minutes=studyMinutesFor(p);if(minutes<state.timeFilter.min||minutes>state.timeFilter.max)return false;}const hay=`${p.title||""} ${p.hierarchy||""}`.toLowerCase();return !state.query||hay.includes(state.query);});}
 function studyFactor(page){return /Language guide|Interoperability|Development/i.test(page.hierarchy||"")?2.8:/Kotlin tour/i.test(page.hierarchy||"")?2.4:2.2;}
 function readingMinutesFor(page,wpm=state.readingWpm){return Math.max(1,Math.ceil((page.wordCount||0)/wpm));}
 function studyMinutesFor(page,wpm=state.readingWpm){const factor=studyFactor(page),baselineReading=readingMinutesFor(page,200),currentReading=readingMinutesFor(page,wpm),baselineStudy=Number(page.estimatedStudyMinutes)||baselineReading;const practiceMinutes=Math.max(0,baselineStudy-Math.ceil(baselineReading*factor));return Math.max(currentReading,Math.ceil(currentReading*factor+practiceMinutes));}
+function timeHardMaximum(){return Math.max(TIME_MIN_VISIBLE_MAX,...state.pages.map(page=>studyMinutesFor(page)));}
+function desiredTimeVisibleMaximum(selectedMax){return Math.min(state.timeFilter.hardMax,Math.max(TIME_MIN_VISIBLE_MAX,Math.ceil((selectedMax+TIME_HEADROOM)/TIME_STEP)*TIME_STEP));}
+function setTimeScaleMax(nextMax){state.timeFilter.visibleMax=Math.max(TIME_MIN_VISIBLE_MAX,Math.min(state.timeFilter.hardMax,nextMax));$("timeMinRange").max=state.timeFilter.visibleMax;$("timeMaxRange").max=state.timeFilter.visibleMax;$("timeVisibleMax").textContent=`${state.timeFilter.visibleMax} min`;}
+function refreshTimeFilterBounds(){state.timeFilter.hardMax=timeHardMaximum();state.timeFilter.min=Math.min(state.timeFilter.min,Math.max(0,state.timeFilter.hardMax-TIME_STEP));state.timeFilter.max=Math.min(state.timeFilter.max,state.timeFilter.hardMax);if(state.timeFilter.max<=state.timeFilter.min)state.timeFilter.min=Math.max(0,state.timeFilter.max-TIME_STEP);setTimeScaleMax(desiredTimeVisibleMaximum(state.timeFilter.max));$("timeMinRange").value=state.timeFilter.min;$("timeMaxRange").value=state.timeFilter.max;updateTimeFilterUi();}
+function updateTimeFilterUi(){const visible=state.timeFilter.visibleMax;const left=state.timeFilter.min/visible*100;const right=state.timeFilter.max/visible*100;$("timeRangeFill").style.left=`${left}%`;$("timeRangeFill").style.width=`${Math.max(0,right-left)}%`;$("timeRangeReadout").textContent=`${state.timeFilter.min} min – ${state.timeFilter.max} min`;$("timeVisibleMax").textContent=`${visible} min`;}
+function syncTimeFilter(changed){let min=Number($("timeMinRange").value),max=Number($("timeMaxRange").value);if(min>max-TIME_STEP){if(changed==="min")min=Math.max(0,max-TIME_STEP);else max=Math.min(state.timeFilter.hardMax,min+TIME_STEP);}state.timeFilter.min=min;state.timeFilter.max=max;setTimeScaleMax(desiredTimeVisibleMaximum(max));$("timeMinRange").value=min;$("timeMaxRange").value=max;updateTimeFilterUi();render();}
+function toggleTimeFilter(){const opening=!state.timeFilter.enabled;state.timeFilter.enabled=opening;$("timeButton").classList.toggle("active",opening);$("timeButton").setAttribute("aria-expanded",String(opening));$("timePanel").classList.toggle("open",opening);$("timePanel").setAttribute("aria-hidden",String(!opening));if(opening)refreshTimeFilterBounds();render();}
 function hierarchyParents(page,category){const parts=String(page.hierarchy||"").split("→").map(part=>part.trim()).filter(Boolean);if(parts[0]===category)parts.shift();if(parts.length&&parts.at(-1).localeCompare(String(page.title||""),undefined,{sensitivity:"base"})===0)parts.pop();return parts;}
 function hierarchyTree(pages,category){const root={children:new Map(),pages:[]};for(const page of pages){let node=root;for(const name of hierarchyParents(page,category)){if(!node.children.has(name))node.children.set(name,{name,children:new Map(),pages:[]});node=node.children.get(name);}node.pages.push(page);}return root;}
 function hierarchyCount(node){const pages=[...node.pages];for(const child of node.children.values())pages.push(...hierarchyCount(child).pages);return {pages,done:pages.filter(isDone).length};}
@@ -340,4 +363,6 @@ function formatMinutes(m){if(m<60)return `${Math.round(m)}m`;const totalMinutes=
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
 function showBanner(message,error=false){$("statusBannerMessage").textContent=message;const el=$("statusBanner");el.classList.remove("hidden");el.classList.toggle("error",error);}
 function hideBanner(){const el=$("statusBanner");el.classList.add("hidden");el.classList.remove("error");$("statusBannerMessage").textContent="";}
+setTimeScaleMax(TIME_MIN_VISIBLE_MAX);
+updateTimeFilterUi();
 render();
