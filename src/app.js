@@ -71,12 +71,12 @@ async function handleAuthState(user){
 
 async function loadCatalog(){
   const snap=await firestoreSdk.getDocs(firestoreSdk.collection(db,"documentation","pages","items"));
-  state.pages=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!p.deprecated)
+  state.pages=snap.docs.map(d=>({...d.data(),pageId:d.id})).filter(p=>!p.deprecated)
     .sort((a,b)=>(a.order??99999)-(b.order??99999));
 }
 async function loadProgress(){
   const snap=await firestoreSdk.getDocs(firestoreSdk.collection(db,"users",state.user.uid,"progress"));
-  snap.forEach(d=>state.progress.set(d.id,d.data()));
+  snap.forEach(d=>state.progress.set(d.id,{...d.data(),pageId:d.id}));
 }
 async function loadPreferences(){
   const ref=firestoreSdk.doc(db,"users",state.user.uid,"settings","preferences");
@@ -93,8 +93,9 @@ async function savePreferences(){
   );
   render();
 }
-async function setCompleted(pageId,completed){
+async function setCompleted(pageId,completed,sourcePath){
   if(!state.user) return showBanner("Sign in to save progress across devices.");
+  requirePageId(pageId,sourcePath);
   const ref=firestoreSdk.doc(db,"users",state.user.uid,"progress",pageId);
   const value={pageId,completed,completedAt:completed?firestoreSdk.serverTimestamp():null,updatedAt:firestoreSdk.serverTimestamp()};
   await firestoreSdk.setDoc(ref,value,{merge:true});
@@ -148,6 +149,7 @@ async function updateDocumentation(){
         const markdown=await fetchText(`${SOURCE.rawBase}${entry.sourcePath}`);
         return await buildPage(entry,markdown,index);
       } catch (error) {
+        if(error.code==="invalid-page-id") throw error;
         console.warn("Skipping documentation source",entry.sourcePath,error);
         return null;
       }
@@ -155,22 +157,24 @@ async function updateDocumentation(){
     const pages=docs.filter(Boolean);
 
     const existingSnap=await firestoreSdk.getDocs(firestoreSdk.collection(db,"documentation","pages","items"));
-    const existing=new Map(existingSnap.docs.map(d=>[d.id,d.data()]));
-    const incoming=new Map(pages.map(p=>[p.id,p]));
+    const existing=new Map(existingSnap.docs.map(d=>[d.id,{...d.data(),pageId:d.id}]));
+    const incoming=new Map(pages.map(page=>[requirePageId(page.pageId,page.sourcePath),page]));
     let added=0,changed=0,removed=0,unchanged=0;
     const writes=[];
 
     for(const page of pages){
-      const old=existing.get(page.id);
+      const pageId=requirePageId(page.pageId,page.sourcePath);
+      const old=existing.get(pageId);
       if(!old) added++;
       else if(old.sourceHash!==page.sourceHash || old.order!==page.order || old.hierarchy!==page.hierarchy) changed++;
       else unchanged++;
-      writes.push({ref:firestoreSdk.doc(db,"documentation","pages","items",page.id),data:page});
+      writes.push({ref:firestoreSdk.doc(db,"documentation","pages","items",pageId),data:page});
     }
-    for(const [id,old] of existing){
-      if(!incoming.has(id) && !old.deprecated){
+    for(const [pageId,old] of existing){
+      requirePageId(pageId,old.sourcePath);
+      if(!incoming.has(pageId) && !old.deprecated){
         removed++;
-        writes.push({ref:firestoreSdk.doc(db,"documentation","pages","items",id),data:{deprecated:true,deprecatedAt:firestoreSdk.serverTimestamp()}});
+        writes.push({ref:firestoreSdk.doc(db,"documentation","pages","items",pageId),data:{deprecated:true,deprecatedAt:firestoreSdk.serverTimestamp()}});
       }
     }
     await commitInChunks(writes);
@@ -221,14 +225,13 @@ async function buildPage(entry,markdown,index){
   const factor=/Language guide|Interoperability|Development/i.test(entry.hierarchy)?2.8:/Kotlin tour/i.test(entry.hierarchy)?2.4:2.2;
   const estimatedStudyMinutes=Math.max(reading,Math.ceil(reading*factor+codeBlocks*2));
   const slug=entry.sourcePath.split("/").pop().replace(/\.(md|topic)$/i,"");
-  const id=await shortHash(entry.sourcePath.toLowerCase());
+  const pageId=requirePageId(await shortHash(entry.sourcePath.toLowerCase()),entry.sourcePath);
   const sourceHash=await shortHash(markdown);
   const beginnerNullSafety=/Take Kotlin tour → Beginner → Null safety$/i.test(entry.hierarchy);
   const intermediate=/Take Kotlin tour → Intermediate/i.test(entry.hierarchy);
   const beginnerBeforeNull=/Take Kotlin tour → Beginner/i.test(entry.hierarchy) && !beginnerNullSafety;
   return {
-    id,
-    pageId:id,
+    pageId,
     title:entry.title || titleFromPath(slug),
     hierarchy:entry.hierarchy,
     URL:`https://kotlinlang.org/docs/${slug}.html`,
@@ -252,12 +255,13 @@ function titleFromPath(path){return path.split("/").pop().replace(/\.(md|topic)$
 function dedupe(items,key){const seen=new Set();return items.filter(x=>{const k=key(x);if(seen.has(k))return false;seen.add(k);return true;});}
 function stripMarkdown(md){return md.replace(/```[\s\S]*?```/g," ").replace(/`[^`]*`/g," ").replace(/<[^>]+>/g," ").replace(/!\[[^\]]*\]\([^)]*\)/g," ").replace(/\[([^\]]+)\]\([^)]*\)/g,"$1").replace(/[#>*_~|=-]/g," ").replace(/\s+/g," ").trim();}
 async function shortHash(value){const bytes=new TextEncoder().encode(value);const digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("").slice(0,24);}
+function requirePageId(pageId,sourcePath){if(typeof pageId!=="string"||!pageId.trim()){const error=new Error(`Invalid pageId generated for ${sourcePath||"unknown source"}: expected a non-empty string.`);error.code="invalid-page-id";throw error;}return pageId;}
 async function fetchText(url){const r=await fetch(url);if(!r.ok)throw new Error(`${r.status} ${r.statusText}: ${url}`);return r.text();}
 async function mapLimit(items,limit,worker){const output=new Array(items.length);let cursor=0;async function run(){while(true){const i=cursor++;if(i>=items.length)return;output[i]=await worker(items[i],i);}}await Promise.all(Array.from({length:Math.min(limit,items.length)},run));return output;}
 async function commitInChunks(writes){for(let i=0;i<writes.length;i+=400){const batch=firestoreSdk.writeBatch(db);for(const item of writes.slice(i,i+400))batch.set(item.ref,item.data,{merge:true});await batch.commit();}}
 
 function isReview(page){return page.learningMode==="review";}
-function isDone(page){const progress=state.progress.get(page.id);return progress ? progress.completed===true : page.initiallyCompleted===true;}
+function isDone(page){const progress=state.progress.get(page.pageId);return progress ? progress.completed===true : page.initiallyCompleted===true;}
 function filteredPages(){return state.pages.filter(p=>{const done=isDone(p),review=isReview(p);if(state.filter==="done"&&!done)return false;if(state.filter==="todo"&&(done||review))return false;if(state.filter==="review"&&!review)return false;const hay=`${p.title||""} ${p.hierarchy||""}`.toLowerCase();return !state.query||hay.includes(state.query);});}
 function render(){
   const total=state.pages.length,done=state.pages.filter(isDone).length,pct=total?Math.round(done/total*100):0,remaining=state.pages.filter(p=>!isDone(p)).reduce((n,p)=>n+(p.estimatedStudyMinutes||0),0);
@@ -267,9 +271,9 @@ function render(){
   $("emptyState").classList.toggle("hidden",total>0); $("curriculum").classList.toggle("hidden",total===0); if(!total)return;
   const groups=new Map(); filteredPages().forEach(p=>{const category=p.category||String(p.hierarchy||"Other").split(" → ")[0];if(!groups.has(category))groups.set(category,[]);groups.get(category).push(p)});
   $("curriculum").innerHTML=[...groups].map(([category,pages])=>`<article class="category glass"><div class="category-header"><span class="category-title">${esc(category)}</span><span class="category-meta">${pages.filter(isDone).length}/${pages.length} complete</span></div><div class="lesson-list">${pages.map(lessonHtml).join("")}</div></article>`).join("") || `<div class="empty-state glass"><h2>No matching pages</h2><p>Try another search or filter.</p></div>`;
-  $("curriculum").querySelectorAll(".lesson-check").forEach(c=>c.addEventListener("change",()=>setCompleted(c.dataset.id,c.checked)));
+  $("curriculum").querySelectorAll(".lesson-check").forEach(c=>c.addEventListener("change",()=>setCompleted(c.dataset.pageId,c.checked,c.dataset.sourcePath)));
 }
-function lessonHtml(p){const review=isReview(p),done=isDone(p),wpm=Number($("wpmInput").value)||200,reading=Math.max(1,Math.ceil((p.wordCount||0)/wpm));return `<div class="lesson"><input class="lesson-check" data-id="${esc(p.id)}" type="checkbox" ${done?"checked":""} aria-label="Mark ${esc(p.title)} complete"><div><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a>${review?'<span class="review-badge">REVIEW</span>':''}</div><div class="lesson-path">${esc(p.hierarchy||"")}</div></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${p.estimatedStudyMinutes||"—"}m study</div></div>`;}
+function lessonHtml(p){const review=isReview(p),done=isDone(p),wpm=Number($("wpmInput").value)||200,reading=Math.max(1,Math.ceil((p.wordCount||0)/wpm));return `<div class="lesson"><input class="lesson-check" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" type="checkbox" ${done?"checked":""} aria-label="Mark ${esc(p.title)} complete"><div><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a>${review?'<span class="review-badge">REVIEW</span>':''}</div><div class="lesson-path">${esc(p.hierarchy||"")}</div></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${p.estimatedStudyMinutes||"—"}m study</div></div>`;}
 function formatMinutes(m){if(m<60)return `${Math.round(m)}m`;const h=Math.floor(m/60),min=Math.round(m%60);return min?`${h}h ${min}m`:`${h}h`;}
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
 function showBanner(message,error=false){const el=$("statusBanner");el.textContent=message;el.classList.remove("hidden");el.classList.toggle("error",error);}
