@@ -3,9 +3,15 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "functions": [{
-    "source": "functions",
-    "codebase": "default",
-    "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log"]
-  }]
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Kotlin Learning Tracker",
+        "supportEmail": "ferhatsanli.nl@gmail.com",
+        "authorizedRedirectUris": [
+          "https://ferhatsanli.github.io/kotlin-learning-tracker/"
+        ]
+      }
+    }
+  }
 }

@@ -8,5 +8,4 @@ export const firebaseConfig = {
   appId: "1:1052213919057:web:456c8d9cfe90126cd7a770"
 };
 
-export const functionsRegion = "us-central1";
 export const firebaseSdkVersion = "12.18.0";
