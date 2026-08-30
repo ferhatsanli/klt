@@ -8,7 +8,7 @@
   <title>Kotlin Learning Tracker</title>
   <link rel="icon" type="image/svg+xml" href="./kotlin-icon.svg" />
   <link rel="apple-touch-icon" href="./kotlin-icon.svg" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=5" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -74,6 +74,25 @@
         <button class="filter-button" data-filter="todo" type="button">To Learn</button>
         <button class="filter-button" data-filter="review" type="button">Review</button>
         <button class="filter-button" data-filter="done" type="button">Completed</button>
+        <button id="timeButton" class="filter-button" type="button" aria-expanded="false" aria-controls="timePanel">Time</button>
+      </div>
+
+      <div id="timePanel" class="time-filter-panel" aria-hidden="true">
+        <div class="time-filter-inner">
+          <div class="time-filter-head">
+            <span class="time-filter-title">Study time range</span>
+            <strong id="timeRangeReadout">20 min – 40 min</strong>
+          </div>
+          <div class="time-range-wrap">
+            <div class="time-range-track"><div id="timeRangeFill" class="time-range-fill"></div></div>
+            <input id="timeMinRange" type="range" min="0" max="60" step="5" value="20" aria-label="Minimum study time" />
+            <input id="timeMaxRange" type="range" min="0" max="60" step="5" value="40" aria-label="Maximum study time" />
+          </div>
+          <div class="time-range-scale">
+            <span>0 min</span>
+            <span id="timeVisibleMax">60 min</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -127,6 +146,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="./src/app.js"></script>
+  <script type="module" src="./src/app.js?v=5"></script>
 </body>
 </html>
