@@ -34,6 +34,7 @@ $("authButton").addEventListener("click", signIn);
 $("signOutButton").addEventListener("click", () => auth && authSdk.signOut(auth));
 $("checkUpdatesButton").addEventListener("click", checkUpdates);
 $("updateDocsButton").addEventListener("click", updateDocumentation);
+$("statusBannerClose").addEventListener("click", hideBanner);
 $("searchInput").addEventListener("input", (e) => { state.query=e.target.value.toLowerCase().trim(); render(); });
 $("wpmInput").addEventListener("change", savePreferences);
 document.querySelectorAll(".filter-button").forEach(b => b.addEventListener("click", () => {
@@ -188,6 +189,7 @@ async function updateDocumentation(){
 
     $("updateStatus").textContent=`Updated: ${added} added, ${changed} changed, ${removed} removed, ${pages.length} total.`;
     state.updateAvailable=false;
+    hideBanner();
     await loadCatalog(); render();
   }catch(e){
     console.error(e);
@@ -276,5 +278,6 @@ function render(){
 function lessonHtml(p){const review=isReview(p),done=isDone(p),wpm=Number($("wpmInput").value)||200,reading=Math.max(1,Math.ceil((p.wordCount||0)/wpm));return `<div class="lesson"><input class="lesson-check" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" type="checkbox" ${done?"checked":""} aria-label="Mark ${esc(p.title)} complete"><div><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a>${review?'<span class="review-badge">REVIEW</span>':''}</div><div class="lesson-path">${esc(p.hierarchy||"")}</div></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${p.estimatedStudyMinutes||"—"}m study</div></div>`;}
 function formatMinutes(m){if(m<60)return `${Math.round(m)}m`;const h=Math.floor(m/60),min=Math.round(m%60);return min?`${h}h ${min}m`:`${h}h`;}
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
-function showBanner(message,error=false){const el=$("statusBanner");el.textContent=message;el.classList.remove("hidden");el.classList.toggle("error",error);}
+function showBanner(message,error=false){$("statusBannerMessage").textContent=message;const el=$("statusBanner");el.classList.remove("hidden");el.classList.toggle("error",error);}
+function hideBanner(){const el=$("statusBanner");el.classList.add("hidden");el.classList.remove("error");$("statusBannerMessage").textContent="";}
 render();
