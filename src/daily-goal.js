@@ -66,11 +66,8 @@ function updateDraftFromSelected(){
   const hours=selectedValue($("dailyHoursWheel"));
   const minutes=selectedValue($("dailyMinutesWheel"));
   draftDailyMinutes=Math.max(MINUTE_STEP,hours*60+minutes);
-  updateMetric(draftDailyMinutes);
 }
 function captureVisibleWheelValues(){
-  // Android Chrome may close the dialog before the debounced scroll handler runs.
-  // Capture the actual centered options synchronously when Settings closes.
   const hours=Number(nearestOption($("dailyHoursWheel"))?.dataset.value||0);
   const minutes=Number(nearestOption($("dailyMinutesWheel"))?.dataset.value||0);
   selectOption($("dailyHoursWheel"),$("dailyHoursWheel").querySelector(`[data-value="${hours}"]`),false);
@@ -87,7 +84,7 @@ function setPicker(totalMinutes){
     scrollToValue($("dailyMinutesWheel"),minutes);
   });
   draftDailyMinutes=safe;
-  updateMetric(safe);
+  updateMetric(savedDailyMinutes);
 }
 function parseRemainingMinutes(text){
   if(!text||text.trim()==="—")return null;
@@ -119,10 +116,10 @@ async function loadDailyGoal(user){
     savedDailyMinutes=DEFAULT_DAILY_MINUTES;
   }
   setPicker(savedDailyMinutes);
+  updateMetric(savedDailyMinutes);
 }
 async function saveDailyGoal(){
   const nextDailyMinutes=captureVisibleWheelValues();
-  if(nextDailyMinutes===savedDailyMinutes){updateMetric(savedDailyMinutes);return;}
   savedDailyMinutes=nextDailyMinutes;
   updateMetric(savedDailyMinutes);
   if(!currentUser)return;
@@ -141,8 +138,8 @@ buildWheel($("dailyHoursWheel"),wheelValues(12));
 buildWheel($("dailyMinutesWheel"),wheelValues(55,MINUTE_STEP));
 setPicker(DEFAULT_DAILY_MINUTES);
 authSdk.onAuthStateChanged(auth,loadDailyGoal);
-$("settingsDialog").addEventListener("close",saveDailyGoal);
 $("settingsButton").addEventListener("click",()=>setPicker(savedDailyMinutes));
+window.addEventListener("klt-save-settings",saveDailyGoal);
 
 const timeObserver=new MutationObserver(()=>updateMetric(savedDailyMinutes));
 timeObserver.observe($("timeMetric"),{childList:true,characterData:true,subtree:true});
