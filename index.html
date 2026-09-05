@@ -8,7 +8,7 @@
   <title>Kotlin Learning Tracker</title>
   <link rel="icon" type="image/svg+xml" href="./kotlin-icon.svg" />
   <link rel="apple-touch-icon" href="./kotlin-icon.svg" />
-  <link rel="stylesheet" href="./styles.css?v=5" />
+  <link rel="stylesheet" href="./styles.css?v=6" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -56,6 +56,11 @@
         <span class="metric-label">Study time left</span>
         <strong id="timeMetric">—</strong>
         <small>estimated</small>
+      </article>
+      <article class="metric-card glass daily-goal-card">
+        <span class="metric-label">At your daily goal</span>
+        <strong id="dailyGoalMetric">—</strong>
+        <small id="dailyGoalSub">at 30m/day</small>
       </article>
       <article class="metric-card glass">
         <span class="metric-label">Catalog</span>
@@ -137,6 +142,23 @@
       </label>
     </div>
 
+    <div class="settings-section daily-goal-setting">
+      <div>
+        <h3>Daily study goal</h3>
+        <p>Set how much focused Kotlin study time you want to complete each day.</p>
+      </div>
+      <div class="duration-picker" aria-label="Daily study goal">
+        <div class="duration-wheel-group">
+          <div id="dailyHoursWheel" class="duration-wheel" role="listbox" aria-label="Hours"></div>
+          <span>h</span>
+        </div>
+        <div class="duration-wheel-group">
+          <div id="dailyMinutesWheel" class="duration-wheel" role="listbox" aria-label="Minutes"></div>
+          <span>m</span>
+        </div>
+      </div>
+    </div>
+
     <div class="settings-section">
       <div>
         <h3>Account</h3>
@@ -146,6 +168,7 @@
     </div>
   </dialog>
 
-  <script type="module" src="./src/app.js?v=5"></script>
+  <script type="module" src="./src/app.js?v=6"></script>
+  <script type="module" src="./src/daily-goal.js?v=1"></script>
 </body>
 </html>
