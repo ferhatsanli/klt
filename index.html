@@ -8,7 +8,7 @@
   <title>Kotlin Learning Tracker</title>
   <link rel="icon" type="image/svg+xml" href="./kotlin-icon.svg" />
   <link rel="apple-touch-icon" href="./kotlin-icon.svg" />
-  <link rel="stylesheet" href="./styles.css?v=6" />
+  <link rel="stylesheet" href="./styles.css?v=7" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -166,9 +166,19 @@
       </div>
       <button id="signOutButton" class="secondary-button hidden" type="button">Sign out</button>
     </div>
+
+    <div class="settings-footer">
+      <button id="saveSettingsButton" class="primary-button settings-save-button" type="button">Save</button>
+    </div>
   </dialog>
 
-  <script type="module" src="./src/app.js?v=6"></script>
-  <script type="module" src="./src/daily-goal.js?v=2"></script>
+  <script>
+    document.getElementById("saveSettingsButton").addEventListener("click",()=>{
+      window.dispatchEvent(new CustomEvent("klt-save-settings"));
+      document.getElementById("settingsDialog").close();
+    });
+  </script>
+  <script type="module" src="./src/app.js?v=7"></script>
+  <script type="module" src="./src/daily-goal.js?v=3"></script>
 </body>
 </html>
