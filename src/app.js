@@ -44,7 +44,6 @@ if (configured) {
 }
 
 $("settingsButton").addEventListener("click", () => $("settingsDialog").showModal());
-$("settingsDialog").addEventListener("close", applyReadingSpeed);
 $("authButton").addEventListener("click", signIn);
 $("signOutButton").addEventListener("click", () => auth && authSdk.signOut(auth));
 $("checkUpdatesButton").addEventListener("click", checkUpdates);
@@ -58,6 +57,7 @@ document.querySelectorAll(".filter-button[data-filter]").forEach(b => b.addEvent
 $("timeButton").addEventListener("click", toggleTimeFilter);
 $("timeMinRange").addEventListener("input",()=>syncTimeFilter("min"));
 $("timeMaxRange").addEventListener("input",()=>syncTimeFilter("max"));
+window.addEventListener("klt-save-settings",applyReadingSpeed);
 
 async function signIn(){
   if(!auth) return;
@@ -360,7 +360,7 @@ function render(){
 }
 function lessonHtml(p){const status=statusOf(p),reading=readingMinutesFor(p),study=studyMinutesFor(p);return `<div class="lesson"><select class="lesson-status status-${esc(status)}" data-page-id="${esc(p.pageId)}" data-source-path="${esc(p.sourcePath)}" aria-label="Status for ${esc(p.title)}"><option value="toLearn" ${status===LESSON_STATUS.TO_LEARN?"selected":""}>To Learn</option><option value="review" ${status===LESSON_STATUS.REVIEW?"selected":""}>Review</option><option value="completed" ${status===LESSON_STATUS.COMPLETED?"selected":""}>Completed</option></select><div class="lesson-title"><a href="${esc(p.URL||p.url||"#")}" target="_blank" rel="noopener">${esc(p.title||"Untitled")}</a></div><div class="lesson-stats">${Number(p.wordCount||0).toLocaleString()} words · ${reading}m read · ${study}m study</div></div>`;}
 function formatMinutes(m){if(m<60)return `${Math.round(m)}m`;const totalMinutes=Math.round(m);if(totalMinutes<1440){const h=Math.floor(totalMinutes/60),min=totalMinutes%60;return min?`${h}h ${min}m`:`${h}h`;}const days=Math.floor(totalMinutes/1440),remainingMinutes=totalMinutes%1440,hours=Math.floor(remainingMinutes/60),min=remainingMinutes%60;const parts=[`${days}d`];if(hours)parts.push(`${hours}h`);if(min)parts.push(`${min}m`);return parts.join(" ");}
-function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
+function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
 function showBanner(message,error=false){$("statusBannerMessage").textContent=message;const el=$("statusBanner");el.classList.remove("hidden");el.classList.toggle("error",error);}
 function hideBanner(){const el=$("statusBanner");el.classList.add("hidden");el.classList.remove("error");$("statusBannerMessage").textContent="";}
 setTimeScaleMax(TIME_MIN_VISIBLE_MAX);
