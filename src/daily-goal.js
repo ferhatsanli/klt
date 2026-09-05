@@ -16,20 +16,20 @@ const MINUTE_STEP=5;
 let savedDailyMinutes=DEFAULT_DAILY_MINUTES;
 let draftDailyMinutes=DEFAULT_DAILY_MINUTES;
 let currentUser=null;
-let scrollTimer;
+const scrollTimers=new WeakMap();
 
 function wheelValues(max,step=1){return Array.from({length:Math.floor(max/step)+1},(_,i)=>i*step);}
 function buildWheel(element,values){
   element.innerHTML=`<div class="wheel-spacer"></div>${values.map(value=>`<button type="button" class="wheel-option" data-value="${value}" role="option" aria-selected="false">${String(value).padStart(2,"0")}</button>`).join("")}<div class="wheel-spacer"></div>`;
   element.addEventListener("scroll",()=>{
-    clearTimeout(scrollTimer);
-    scrollTimer=setTimeout(()=>{snapWheel(element);updateDraft();},70);
+    clearTimeout(scrollTimers.get(element));
+    scrollTimers.set(element,setTimeout(()=>commitWheelPosition(element),90));
   },{passive:true});
   element.addEventListener("click",event=>{
     const option=event.target.closest(".wheel-option");
     if(!option)return;
-    scrollToValue(element,Number(option.dataset.value),true);
-    window.setTimeout(updateDraft,180);
+    selectOption(element,option,true);
+    updateDraftFromSelected();
   });
 }
 function nearestOption(element){
@@ -39,24 +39,44 @@ function nearestOption(element){
     return !best||Math.abs(optionCenter-center)<best.distance?{option,distance:Math.abs(optionCenter-center)}:best;
   },null)?.option;
 }
-function snapWheel(element){
+function selectOption(element,option,smooth=false){
+  if(!option)return;
+  element.querySelectorAll(".wheel-option").forEach(item=>{
+    const selected=item===option;
+    item.classList.toggle("selected",selected);
+    item.setAttribute("aria-selected",String(selected));
+  });
+  element.scrollTo({top:option.offsetTop-(element.clientHeight-option.offsetHeight)/2,behavior:smooth?"smooth":"auto"});
+}
+function commitWheelPosition(element){
   const option=nearestOption(element);
   if(!option)return;
-  element.querySelectorAll(".wheel-option").forEach(item=>{const selected=item===option;item.classList.toggle("selected",selected);item.setAttribute("aria-selected",String(selected));});
-  element.scrollTo({top:option.offsetTop-(element.clientHeight-option.offsetHeight)/2,behavior:"smooth"});
+  selectOption(element,option,false);
+  updateDraftFromSelected();
 }
-function scrollToValue(element,value,smooth=false){
+function scrollToValue(element,value){
   const option=element.querySelector(`[data-value="${value}"]`)||element.querySelector(".wheel-option");
-  if(!option)return;
-  element.scrollTo({top:option.offsetTop-(element.clientHeight-option.offsetHeight)/2,behavior:smooth?"smooth":"auto"});
-  element.querySelectorAll(".wheel-option").forEach(item=>{const selected=item===option;item.classList.toggle("selected",selected);item.setAttribute("aria-selected",String(selected));});
+  selectOption(element,option,false);
 }
-function selectedValue(element){return Number(nearestOption(element)?.dataset.value||0);}
-function updateDraft(){
+function selectedValue(element){
+  const selected=element.querySelector('.wheel-option[aria-selected="true"]');
+  return Number(selected?.dataset.value||0);
+}
+function updateDraftFromSelected(){
   const hours=selectedValue($("dailyHoursWheel"));
   const minutes=selectedValue($("dailyMinutesWheel"));
   draftDailyMinutes=Math.max(MINUTE_STEP,hours*60+minutes);
   updateMetric(draftDailyMinutes);
+}
+function captureVisibleWheelValues(){
+  // Android Chrome may close the dialog before the debounced scroll handler runs.
+  // Capture the actual centered options synchronously when Settings closes.
+  const hours=Number(nearestOption($("dailyHoursWheel"))?.dataset.value||0);
+  const minutes=Number(nearestOption($("dailyMinutesWheel"))?.dataset.value||0);
+  selectOption($("dailyHoursWheel"),$("dailyHoursWheel").querySelector(`[data-value="${hours}"]`),false);
+  selectOption($("dailyMinutesWheel"),$("dailyMinutesWheel").querySelector(`[data-value="${minutes}"]`),false);
+  draftDailyMinutes=Math.max(MINUTE_STEP,hours*60+minutes);
+  return draftDailyMinutes;
 }
 function setPicker(totalMinutes){
   const safe=Math.max(MINUTE_STEP,Math.round(totalMinutes/MINUTE_STEP)*MINUTE_STEP);
@@ -101,9 +121,9 @@ async function loadDailyGoal(user){
   setPicker(savedDailyMinutes);
 }
 async function saveDailyGoal(){
-  updateDraft();
-  if(draftDailyMinutes===savedDailyMinutes)return;
-  savedDailyMinutes=draftDailyMinutes;
+  const nextDailyMinutes=captureVisibleWheelValues();
+  if(nextDailyMinutes===savedDailyMinutes){updateMetric(savedDailyMinutes);return;}
+  savedDailyMinutes=nextDailyMinutes;
   updateMetric(savedDailyMinutes);
   if(!currentUser)return;
   try{
